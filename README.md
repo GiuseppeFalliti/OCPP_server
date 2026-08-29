@@ -2,6 +2,10 @@
 
 Questo e' il server applicativo del progetto. Accetta charge point OCPP 1.6J tramite WebSocket, registra ogni messaggio, gestisce RFID e salva stato, transazioni e telemetria in PostgreSQL.
 
+```text
+Il server sarà raggiugibile dai CP su ws://34.73.197.164:9000/ID_CP
+```
+
 ## Struttura del server
 
 ```text
