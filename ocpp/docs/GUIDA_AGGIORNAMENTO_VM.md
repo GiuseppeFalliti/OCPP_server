@@ -23,8 +23,6 @@ Per abilitare la console web, aggiungere inoltre:
 ```env
 UI_HOST=0.0.0.0
 UI_PORT=8080
-UI_USERNAME=admin
-UI_PASSWORD=SCEGLI_UNA_PASSWORD_FORTE
 ```
 
 ## Log JSON locali
@@ -86,7 +84,7 @@ sudo ss -ltnp | grep :9000
 
 L'output atteso contiene `0.0.0.0:9000`.
 
-La console è disponibile su `http://IP_VM:8080` e richiede le credenziali Basic Auth configurate nel file `.env`. Creare inoltre una regola firewall Google Cloud TCP `8080`, limitata agli IP amministrativi autorizzati.
+La console è disponibile su `http://IP_VM:8080`. Creare una regola firewall Google Cloud TCP `8080`, limitata agli IP amministrativi autorizzati.
 
 ## Riavviare senza aggiornare il codice
 

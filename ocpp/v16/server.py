@@ -219,10 +219,6 @@ async def main() -> None:
     port = int(os.getenv("OCPP_PORT", "9000"))
     ui_host = os.getenv("UI_HOST", "0.0.0.0")
     ui_port = int(os.getenv("UI_PORT", "8080"))
-    ui_username = os.getenv("UI_USERNAME")
-    ui_password = os.getenv("UI_PASSWORD")
-    if not ui_username or not ui_password:
-        raise RuntimeError("UI_USERNAME e UI_PASSWORD devono essere impostate.")
     log_store = JsonLogStore(
         os.getenv("OCPP_LOG_DIR") or None,
         int(os.getenv("OCPP_LOG_RETENTION_DAYS", "30")),
@@ -233,7 +229,7 @@ async def main() -> None:
         repository = OcppRepository(pool)
         active_chargepoints = ActiveChargePoints()
         static_dir = Path(__file__).resolve().parents[2] / "ui" / "dist"
-        app = create_admin_app(repository, active_chargepoints, ui_username, ui_password, static_dir)
+        app = create_admin_app(repository, active_chargepoints, static_dir)
         http_server = uvicorn.Server(uvicorn.Config(app, host=ui_host, port=ui_port, log_level="info"))
         http_task = asyncio.create_task(http_server.serve())
         async with websockets.serve(

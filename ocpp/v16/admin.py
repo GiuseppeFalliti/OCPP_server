@@ -1,14 +1,13 @@
 """API HTTP amministrativa per la console OCPP."""
 
 import asyncio
-import secrets
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -62,17 +61,8 @@ def serialize(value: Any) -> Any:
 
 
 def create_admin_app(repository: OcppRepository, active: ActiveChargePoints,
-                     username: str, password: str, static_dir: Path) -> FastAPI:
+                     static_dir: Path) -> FastAPI:
     app = FastAPI(title="OCPP Server Admin", docs_url=None, redoc_url=None)
-
-    @app.middleware("http")
-    async def basic_auth(request: Request, call_next):
-        auth = request.headers.get("Authorization", "")
-        expected = f"Basic {__import__('base64').b64encode(f'{username}:{password}'.encode()).decode()}"
-        if not secrets.compare_digest(auth, expected):
-            return JSONResponse({"detail": "Autenticazione richiesta"}, status_code=401,
-                                headers={"WWW-Authenticate": "Basic"})
-        return await call_next(request)
 
     @app.get("/api/health")
     async def health(): return {"status": "ok"}

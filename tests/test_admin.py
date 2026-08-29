@@ -29,15 +29,14 @@ class AdminApiTest(unittest.IsolatedAsyncioTestCase):
 
 class AdminHttpTest(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(create_admin_app(RepositoryStub(), ActiveChargePoints(), "admin", "password", Path("missing-dist")))
+        self.client = TestClient(create_admin_app(RepositoryStub(), ActiveChargePoints(), Path("missing-dist")))
 
-    def test_requires_basic_auth(self):
-        self.assertEqual(self.client.get("/api/dashboard").status_code, 401)
+    def test_dashboard_is_public(self):
+        self.assertEqual(self.client.get("/api/dashboard").status_code, 200)
 
     def test_dashboard_and_manual_chargepoint(self):
-        auth = ("admin", "password")
-        self.assertEqual(self.client.get("/api/dashboard", auth=auth).json()["online"], 1)
-        response = self.client.post("/api/charge-points", auth=auth, json={"identity":"CP-02", "serial_number":"SER-02", "vendor":"Vendor", "model":"Model"})
+        self.assertEqual(self.client.get("/api/dashboard").json()["online"], 1)
+        response = self.client.post("/api/charge-points", json={"identity":"CP-02", "serial_number":"SER-02", "vendor":"Vendor", "model":"Model"})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["chargepointorigin"], "CP-02")
 
