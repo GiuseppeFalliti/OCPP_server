@@ -14,6 +14,7 @@ from ocpp.routing import on
 from ocpp.v16 import ChargePoint as BaseChargePoint
 from ocpp.v16 import call_result
 from ocpp.v16.db.repository import OcppRepository
+from ocpp.v16.json_logger import ChargePointJsonLogger, JsonLogStore, decode_frame
 from ocpp.v16.enums import (
     Action,
     AuthorizationStatus,
@@ -27,22 +28,37 @@ LOGGER = logging.getLogger("ocpp.v16.server")
 class ChargePoint(BaseChargePoint):
     """Handler OCPP 1.6J che registra messaggi e dati normalizzati."""
 
-    def __init__(self, charge_point_id, connection, repository, remote_ip=None):
+    def __init__(
+        self, charge_point_id, connection, repository, json_logger, remote_ip=None
+    ):
         super().__init__(charge_point_id, connection)
         self.repository = repository
+        self.json_logger: ChargePointJsonLogger = json_logger
         self.remote_ip = remote_ip
+        self._request_actions: dict[str, str] = {}
 
     async def route_message(self, raw_msg):
+        action, frame = decode_frame(raw_msg)
+        if isinstance(frame, list) and len(frame) > 2 and frame[0] == 2:
+            self._request_actions[str(frame[1])] = action
+        await self.json_logger.event("message", direction="incoming", raw=raw_msg, action=action)
         await self.repository.record_message(self.id, raw_msg, "incoming")
         await super().route_message(raw_msg)
 
     async def _send(self, message):
+        action, frame = decode_frame(message)
+        if isinstance(frame, list) and len(frame) > 1 and frame[0] in (3, 4):
+            action = self._request_actions.pop(str(frame[1]), action)
+        await self.json_logger.event("message", direction="outgoing", raw=message, action=action)
         await self.repository.record_message(self.id, message, "outgoing")
         await super()._send(message)
 
     @on(Action.boot_notification)
     async def on_boot_notification(self, **payload):
-        await self.repository.ensure_chargepoint(self.id, payload, self.remote_ip)
+        chargepoint = await self.repository.ensure_chargepoint(
+            self.id, payload, self.remote_ip
+        )
+        await self.json_logger.set_serial_number(chargepoint["serial_number"])
         return call_result.BootNotification(
             current_time=datetime.now(timezone.utc).isoformat(),
             interval=int(os.getenv("HEARTBEAT_INTERVAL", "60")),
@@ -146,7 +162,7 @@ class ChargePoint(BaseChargePoint):
         return call_result.DataTransfer(status=DataTransferStatus.rejected)
 
 
-async def on_connect(websocket, repository: OcppRepository):
+async def on_connect(websocket, repository: OcppRepository, log_store: JsonLogStore):
     """Valida il sottoprotocollo e avvia un handler per la connessione CP."""
     if not websocket.subprotocol:
         LOGGER.warning("Sottoprotocollo OCPP non negoziato; chiusura connessione")
@@ -156,8 +172,18 @@ async def on_connect(websocket, repository: OcppRepository):
         LOGGER.warning("ID charge point mancante nel path %s", websocket.request.path)
         return await websocket.close()
     remote_ip = getattr(websocket, "remote_address", (None,))[0]
+    serial_number = await repository.get_chargepoint_serial(charge_point_id)
+    json_logger = ChargePointJsonLogger(
+        log_store, charge_point_id, remote_ip, serial_number
+    )
+    await json_logger.event("connected")
     LOGGER.info("Charge point %s connesso", charge_point_id)
-    await ChargePoint(charge_point_id, websocket, repository, remote_ip).start()
+    try:
+        await ChargePoint(
+            charge_point_id, websocket, repository, json_logger, remote_ip
+        ).start()
+    finally:
+        await json_logger.event("disconnected")
 
 
 async def main() -> None:
@@ -168,11 +194,16 @@ async def main() -> None:
         raise RuntimeError("DATABASE_URL non e' impostata.")
     host = os.getenv("OCPP_HOST", "0.0.0.0")
     port = int(os.getenv("OCPP_PORT", "9000"))
+    log_store = JsonLogStore(
+        os.getenv("OCPP_LOG_DIR") or None,
+        int(os.getenv("OCPP_LOG_RETENTION_DAYS", "30")),
+    )
+    await log_store.cleanup()
     pool = await asyncpg.create_pool(dsn=database_url, min_size=1, max_size=10)
     try:
         repository = OcppRepository(pool)
         async with websockets.serve(
-            lambda websocket: on_connect(websocket, repository),
+            lambda websocket: on_connect(websocket, repository, log_store),
             host,
             port,
             subprotocols=["ocpp1.6"],

@@ -51,6 +51,13 @@ class OcppRepository:
             way,
         )
 
+    async def get_chargepoint_serial(self, identity: str) -> str | None:
+        """Restituisce il seriale già registrato per l'identità OCPP."""
+        return await self.pool.fetchval(
+            "SELECT serial_number FROM ocpp_chargepoint WHERE chargepointorigin = $1",
+            identity,
+        )
+
     async def ensure_chargepoint(
         self,
         identity: str,

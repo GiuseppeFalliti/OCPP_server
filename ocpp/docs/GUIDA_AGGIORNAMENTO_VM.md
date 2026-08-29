@@ -18,9 +18,21 @@ La configurazione riservata del server è nel file:
 
 Il file `.env` non deve essere committato nel repository e non viene sovrascritto da `git pull`.
 
+## Log JSON locali
+
+Il server conserva una copia giornaliera degli eventi OCPP in:
+
+```text
+/opt/ocpp-server/app/ocpp/Logs/<seriale>/YYYY-MM-DD.json
+```
+
+Ogni riga è un oggetto JSON indipendente (JSON Lines). I log vengono trattenuti per 30 giorni. Facoltativamente, nel file `.env` è possibile impostare `OCPP_LOG_DIR` per usare un percorso diverso e `OCPP_LOG_RETENTION_DAYS` per cambiare il numero di giorni di conservazione.
+
 ## Aggiornare il codice
 
 Collegarsi alla VM via SSH, quindi eseguire questi comandi. Il controllo iniziale evita di sovrascrivere eventuali modifiche locali non ancora salvate.
+
+> Eseguire l'intero blocco, incluso `sudo -u ocpp -H bash -c`. Non lanciare i comandi interni come utente SSH personale: il repository, il virtualenv e il processo PM2 appartengono all'utente di servizio `ocpp`.
 
 ```bash
 sudo -u ocpp -H bash -c '
