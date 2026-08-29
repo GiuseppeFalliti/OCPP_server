@@ -58,6 +58,12 @@ class OcppRepository:
             identity,
         )
 
+    async def get_chargepoint(self, identity: str) -> asyncpg.Record | None:
+        """Restituisce il Charge Point già censito, se presente."""
+        return await self.pool.fetchrow(
+            "SELECT * FROM ocpp_chargepoint WHERE chargepointorigin = $1", identity
+        )
+
     async def ensure_chargepoint(
         self,
         identity: str,
@@ -65,6 +71,12 @@ class OcppRepository:
         remote_ip: str | None = None,
     ) -> asyncpg.Record:
         boot = boot or {}
+        # Heartbeat e StatusNotification non devono sovrascrivere vendor/modello
+        # con i valori predefiniti quando il CP è già stato creato al Boot.
+        if not boot:
+            existing = await self.get_chargepoint(identity)
+            if existing:
+                return existing
         vendor_name = str(boot.get("charge_point_vendor") or "Unknown vendor")
         model_name = str(boot.get("charge_point_model") or "Unknown model")
         vendor_code = stable_code("vendor", vendor_name)
