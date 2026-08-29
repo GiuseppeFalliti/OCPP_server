@@ -378,13 +378,14 @@ class OcppRepository:
         connector = await self.ensure_connector(cp, payload["connector_id"])
         return await self.pool.fetchrow(
             """INSERT INTO ocpp_transaction
-               (transaction_id, id_tag, meter_start, ts_start, reservation_id, connector_id)
-               VALUES (nextval('ocpp_transaction_id_seq'), $1, $2, $3, $4, $5) RETURNING *""",
+               (transaction_id, id_tag, meter_start, ts_start, reservation_id, connector_id, start_reason)
+               VALUES (nextval('ocpp_transaction_id_seq'), $1, $2, $3, $4, $5, $6) RETURNING *""",
             payload["id_tag"],
             payload["meter_start"],
             parse_timestamp(payload["timestamp"]),
             payload.get("reservation_id"),
             connector["id"],
+            payload.get("start_reason", "LocalStart"),
         )
 
     async def get_transaction(
@@ -464,11 +465,12 @@ class OcppRepository:
             return
         await self.pool.execute(
             """UPDATE ocpp_transaction SET meter_stop = $2, ts_stop = $3, reason = $4,
-               ts_last_meter = $3, last_meter = $2 WHERE id = $1""",
+               stop_reason = $5, ts_last_meter = $3, last_meter = $2 WHERE id = $1""",
             transaction["id"],
             payload["meter_stop"],
             parse_timestamp(payload["timestamp"]),
             str(payload.get("reason")) if payload.get("reason") else None,
+            payload.get("stop_reason", "LocalStop"),
         )
         if payload.get("transaction_data"):
             connector_id = await self.pool.fetchval(

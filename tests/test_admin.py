@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ocpp.v16.admin import ActiveChargePoints, create_admin_app
+from ocpp.v16.api import ActiveChargePoints, create_admin_app
 
 
 class RepositoryStub:
@@ -25,6 +25,16 @@ class AdminApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(await registry.get("CP-01"), second)
         await registry.remove("CP-01", second)
         self.assertIsNone(await registry.get("CP-01"))
+
+    async def test_remote_transaction_markers_are_consumed_once(self):
+        registry = ActiveChargePoints()
+        await registry.mark_remote_start("CP-01", "RFID-01", 1)
+        await registry.mark_remote_stop("CP-01", 42)
+
+        self.assertTrue(await registry.consume_remote_start("CP-01", "RFID-01", 1))
+        self.assertFalse(await registry.consume_remote_start("CP-01", "RFID-01", 1))
+        self.assertTrue(await registry.consume_remote_stop("CP-01", 42))
+        self.assertFalse(await registry.consume_remote_stop("CP-01", 42))
 
 
 class AdminHttpTest(unittest.TestCase):

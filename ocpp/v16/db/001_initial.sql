@@ -165,6 +165,8 @@ CREATE TABLE IF NOT EXISTS ocpp_transaction (
     ts_last_meter TIMESTAMPTZ,
     last_meter BIGINT,
     reason TEXT,
+    start_reason TEXT NOT NULL DEFAULT 'LocalStart',
+    stop_reason TEXT,
     reservation_id BIGINT,
     connector_id BIGINT NOT NULL REFERENCES ocpp_connector(id) ON DELETE CASCADE,
     user_id BIGINT

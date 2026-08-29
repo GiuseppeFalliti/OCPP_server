@@ -1,4 +1,4 @@
-"""API HTTP amministrativa per la console OCPP."""
+"""Applicazione FastAPI della console amministrativa."""
 
 import asyncio
 from dataclasses import asdict, is_dataclass
@@ -12,27 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ocpp.v16 import call
+from ocpp.v16.api.registry import ActiveChargePoints
 from ocpp.v16.db.repository import OcppRepository
-
-
-class ActiveChargePoints:
-    """Registro concorrente delle connessioni OCPP attive."""
-    def __init__(self) -> None:
-        self._items: dict[str, Any] = {}
-        self._lock = asyncio.Lock()
-
-    async def add(self, identity: str, chargepoint: Any) -> None:
-        async with self._lock: self._items[identity] = chargepoint
-
-    async def remove(self, identity: str, chargepoint: Any) -> None:
-        async with self._lock:
-            if self._items.get(identity) is chargepoint: self._items.pop(identity, None)
-
-    async def get(self, identity: str) -> Any | None:
-        async with self._lock: return self._items.get(identity)
-
-    async def identities(self) -> set[str]:
-        async with self._lock: return set(self._items)
 
 
 class ManualChargePoint(BaseModel):
@@ -60,6 +41,11 @@ def serialize(value: Any) -> Any:
     except (TypeError, ValueError): return value
 
 
+def is_accepted(response: Any) -> bool:
+    status = getattr(response, "status", None)
+    return getattr(status, "value", status) == "Accepted"
+
+
 def create_admin_app(repository: OcppRepository, active: ActiveChargePoints,
                      static_dir: Path) -> FastAPI:
     app = FastAPI(title="OCPP Server Admin", docs_url=None, redoc_url=None)
@@ -75,8 +61,7 @@ def create_admin_app(repository: OcppRepository, active: ActiveChargePoints,
     @app.get("/api/charge-points")
     async def chargepoints():
         online = await active.identities()
-        return [serialize({**dict(item), "connected": item["chargepointorigin"] in online})
-                for item in await repository.list_chargepoints()]
+        return [serialize({**dict(item), "connected": item["chargepointorigin"] in online}) for item in await repository.list_chargepoints()]
 
     @app.post("/api/charge-points", status_code=201)
     async def create_chargepoint(payload: ManualChargePoint):
@@ -102,6 +87,7 @@ def create_admin_app(repository: OcppRepository, active: ActiveChargePoints,
         try: response = await cp.call(call.RemoteStartTransaction(payload.id_tag, payload.connector_id), suppress=False)
         except asyncio.TimeoutError as error: raise HTTPException(504, "Timeout della risposta OCPP") from error
         except Exception as error: raise HTTPException(502, str(error)) from error
+        if is_accepted(response): await active.mark_remote_start(identity, payload.id_tag, payload.connector_id)
         return serialize(response)
 
     @app.post("/api/charge-points/{identity}/remote-stop")
@@ -110,15 +96,12 @@ def create_admin_app(repository: OcppRepository, active: ActiveChargePoints,
         try: response = await cp.call(call.RemoteStopTransaction(payload.transaction_id), suppress=False)
         except asyncio.TimeoutError as error: raise HTTPException(504, "Timeout della risposta OCPP") from error
         except Exception as error: raise HTTPException(502, str(error)) from error
+        if is_accepted(response): await active.mark_remote_stop(identity, payload.transaction_id)
         return serialize(response)
 
     @app.get("/api/logs")
-    async def logs(identity: str | None = None, action: str | None = None, way: str | None = None,
-                   search: str | None = None, from_date: datetime | None = None, to_date: datetime | None = None,
-                   limit: int = 100, offset: int = 0):
-        rows, total = await repository.list_logs(identity=identity, action=action, way=way,
-                                                  search=search, from_date=from_date, to_date=to_date,
-                                                  limit=min(limit, 200), offset=max(offset, 0))
+    async def logs(identity: str | None = None, action: str | None = None, way: str | None = None, search: str | None = None, from_date: datetime | None = None, to_date: datetime | None = None, limit: int = 100, offset: int = 0):
+        rows, total = await repository.list_logs(identity=identity, action=action, way=way, search=search, from_date=from_date, to_date=to_date, limit=min(limit, 200), offset=max(offset, 0))
         return {"items": serialize(rows), "total": total, "limit": min(limit, 200), "offset": max(offset, 0)}
 
     if static_dir.exists():

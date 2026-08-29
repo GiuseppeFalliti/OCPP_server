@@ -141,7 +141,7 @@ http://IP_O_HOST_SERVER:8080
 
 Il server supporta OCPP 1.6J su WebSocket con sottoprotocollo `ocpp1.6`. Al Boot crea o aggiorna l'anagrafica, registra heartbeat, stati, connettori, transazioni, meter values e frame raw in PostgreSQL e nei file JSON giornalieri.
 
-`Authorize` e `StartTransaction` accettano solo RFID presenti in `ocpp_rfid_tag` con `status = 'Accepted'`, `locked = false` e non scaduti. La console invia `RemoteStartTransaction` e `RemoteStopTransaction` solo a CP connessi; il CP deve supportare e accettare tali comandi.
+`Authorize` e `StartTransaction` accettano solo RFID presenti in `ocpp_rfid_tag` con `status = 'Accepted'`, `locked = false` e non scaduti. La console invia `RemoteStartTransaction` e `RemoteStopTransaction` solo a CP connessi; il CP deve supportare e accettare tali comandi. Le transazioni create da API sono etichettate `RemoteStart`/`RemoteStop`; quelle avviate o terminate localmente tramite RFID o Autocharge sono etichettate `LocalStart`/`LocalStop`. Il motivo tecnico OCPP, ad esempio `EVDisconnected`, rimane separato.
 
 Il server espone attualmente `ws://`, non `wss://`. Se il CP reale richiede TLS o un Security Profile OCPP con certificati, installare un reverse proxy HTTPS/WSS con certificato valido prima di esporlo in produzione.
 

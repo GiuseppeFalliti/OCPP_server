@@ -16,7 +16,7 @@ from ocpp.routing import on
 from ocpp.v16 import ChargePoint as BaseChargePoint
 from ocpp.v16 import call_result
 from ocpp.v16.db.repository import OcppRepository
-from ocpp.v16.admin import ActiveChargePoints, create_admin_app
+from ocpp.v16.api import ActiveChargePoints, create_admin_app
 from ocpp.v16.json_logger import ChargePointJsonLogger, JsonLogStore, decode_frame
 from ocpp.v16.enums import (
     Action,
@@ -41,11 +41,12 @@ class ChargePoint(BaseChargePoint):
     """Handler OCPP 1.6J che registra messaggi e dati normalizzati."""
 
     def __init__(
-        self, charge_point_id, connection, repository, json_logger, remote_ip=None
+        self, charge_point_id, connection, repository, json_logger, active_chargepoints, remote_ip=None
     ):
         super().__init__(charge_point_id, connection)
         self.repository = repository
         self.json_logger: ChargePointJsonLogger = json_logger
+        self.active_chargepoints = active_chargepoints
         self.remote_ip = remote_ip
         self._request_actions: dict[str, str] = {}
 
@@ -121,9 +122,9 @@ class ChargePoint(BaseChargePoint):
             return call_result.StartTransaction(
                 transaction_id=0, id_tag_info={"status": AuthorizationStatus.invalid}
             )
-        transaction = await self.repository.start_transaction(
-            self.id, {"id_tag": id_tag, "connector_id": connector_id, **payload}
-        )
+        start_reason = "RemoteStart" if await self.active_chargepoints.consume_remote_start(self.id, id_tag, connector_id) else "LocalStart"
+        transaction = await self.repository.start_transaction(self.id, {"id_tag": id_tag, "connector_id": connector_id, "start_reason": start_reason, **payload})
+        await self.json_logger.event("transaction_started", details={"transaction_id": transaction["transaction_id"], "start_reason": start_reason})
         return call_result.StartTransaction(
             transaction_id=transaction["transaction_id"],
             id_tag_info={"status": AuthorizationStatus.accepted},
@@ -140,7 +141,10 @@ class ChargePoint(BaseChargePoint):
 
     @on(Action.stop_transaction)
     async def on_stop_transaction(self, **payload):
-        await self.repository.stop_transaction(self.id, payload)
+        transaction_id = payload["transaction_id"]
+        stop_reason = "RemoteStop" if await self.active_chargepoints.consume_remote_stop(self.id, transaction_id) else "LocalStop"
+        await self.repository.stop_transaction(self.id, {"stop_reason": stop_reason, **payload})
+        await self.json_logger.event("transaction_stopped", details={"transaction_id": transaction_id, "stop_reason": stop_reason, "ocpp_reason": payload.get("reason")})
         return call_result.StopTransaction()
 
     @on(Action.firmware_status_notification)
@@ -200,7 +204,7 @@ async def on_connect(websocket, repository: OcppRepository, log_store: JsonLogSt
     )
     await json_logger.event("connected")
     LOGGER.info("Charge point %s connesso", charge_point_id)
-    chargepoint = ChargePoint(charge_point_id, websocket, repository, json_logger, remote_ip)
+    chargepoint = ChargePoint(charge_point_id, websocket, repository, json_logger, active_chargepoints, remote_ip)
     await active_chargepoints.add(charge_point_id, chargepoint)
     try:
         await chargepoint.start()
