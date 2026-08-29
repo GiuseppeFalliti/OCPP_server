@@ -68,6 +68,95 @@ class OcppRepository:
             "SELECT * FROM ocpp_chargepoint WHERE chargepointorigin = $1", identity
         )
 
+    async def list_chargepoints(self) -> list[asyncpg.Record]:
+        return await self.pool.fetch(
+            """SELECT cp.*, COUNT(DISTINCT c.id)::int AS connector_count,
+                      COUNT(DISTINCT t.id) FILTER (WHERE t.ts_stop IS NULL)::int AS open_transactions
+               FROM ocpp_chargepoint cp
+               LEFT JOIN ocpp_connector c ON c.chargepoint_id = cp.id
+               LEFT JOIN ocpp_transaction t ON t.connector_id = c.id
+               GROUP BY cp.id ORDER BY cp.last_heartbeat DESC NULLS LAST, cp.chargepointorigin"""
+        )
+
+    async def create_manual_chargepoint(
+        self, identity: str, serial_number: str, vendor: str, model: str
+    ) -> asyncpg.Record:
+        if await self.get_chargepoint(identity):
+            raise ValueError("Esiste già un Charge Point con questa identità OCPP.")
+        chargepoint = await self.ensure_chargepoint(
+            identity,
+            {
+                "charge_point_vendor": vendor,
+                "charge_point_model": model,
+                "charge_point_serial_number": serial_number,
+            },
+        )
+        await self.ensure_default_connector(chargepoint)
+        return chargepoint
+
+    async def get_chargepoint_detail(self, identity: str) -> dict[str, Any] | None:
+        chargepoint = await self.get_chargepoint(identity)
+        if not chargepoint:
+            return None
+        connectors = await self.pool.fetch(
+            "SELECT * FROM ocpp_connector WHERE chargepoint_id = $1 ORDER BY connector_id",
+            chargepoint["id"],
+        )
+        transactions = await self.pool.fetch(
+            """SELECT t.*, c.connector_id AS ocpp_connector_id FROM ocpp_transaction t
+               JOIN ocpp_connector c ON c.id = t.connector_id
+               WHERE c.chargepoint_id = $1 ORDER BY t.ts_start DESC LIMIT 50""",
+            chargepoint["id"],
+        )
+        logs = await self.pool.fetch(
+            """SELECT * FROM ocpp_message_log WHERE chargepointorigin = $1
+               ORDER BY created_at DESC LIMIT 50""",
+            identity,
+        )
+        return {"chargepoint": chargepoint, "connectors": connectors,
+                "transactions": transactions, "logs": logs}
+
+    async def dashboard(self) -> dict[str, Any]:
+        totals = await self.pool.fetchrow(
+            """SELECT COUNT(*)::int AS chargepoints,
+                      COUNT(*) FILTER (WHERE last_heartbeat > NOW() - INTERVAL '5 minutes')::int AS online
+               FROM ocpp_chargepoint"""
+        )
+        open_transactions = await self.pool.fetchval(
+            "SELECT COUNT(*)::int FROM ocpp_transaction WHERE ts_stop IS NULL"
+        )
+        recent = await self.pool.fetch(
+            "SELECT * FROM ocpp_message_log ORDER BY created_at DESC LIMIT 20"
+        )
+        return {"chargepoints": totals["chargepoints"], "online": totals["online"],
+                "open_transactions": open_transactions, "recent_activity": recent}
+
+    async def list_logs(
+        self, *, identity: str | None = None, action: str | None = None,
+        way: str | None = None, search: str | None = None,
+        from_date: datetime | None = None, to_date: datetime | None = None,
+        limit: int = 100, offset: int = 0,
+    ) -> tuple[list[asyncpg.Record], int]:
+        conditions: list[str] = []
+        values: list[Any] = []
+        for column, value in (("chargepointorigin", identity), ("message_type", action), ("way", way)):
+            if value:
+                values.append(value); conditions.append(f"{column} = ${len(values)}")
+        if search:
+            values.append(f"%{search}%"); conditions.append(f"body ILIKE ${len(values)}")
+        if from_date:
+            values.append(from_date); conditions.append(f"created_at >= ${len(values)}")
+        if to_date:
+            values.append(to_date); conditions.append(f"created_at <= ${len(values)}")
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        count = await self.pool.fetchval(f"SELECT COUNT(*) FROM ocpp_message_log{where}", *values)
+        values.extend((limit, offset))
+        rows = await self.pool.fetch(
+            f"SELECT * FROM ocpp_message_log{where} ORDER BY created_at DESC "
+            f"LIMIT ${len(values) - 1} OFFSET ${len(values)}", *values
+        )
+        return rows, int(count)
+
     async def ensure_chargepoint(
         self,
         identity: str,

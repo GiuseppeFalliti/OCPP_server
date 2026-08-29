@@ -7,3 +7,5 @@ __pycache__/
 *.log
 ocpp/Logs/*
 !ocpp/Logs/.gitkeep
+ui/node_modules/
+ui/dist/

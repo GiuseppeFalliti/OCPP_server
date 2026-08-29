@@ -4,9 +4,11 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import asyncpg
 import websockets
+import uvicorn
 from dotenv import load_dotenv
 
 from ocpp.charge_point import extract_charge_point_id
@@ -14,6 +16,7 @@ from ocpp.routing import on
 from ocpp.v16 import ChargePoint as BaseChargePoint
 from ocpp.v16 import call_result
 from ocpp.v16.db.repository import OcppRepository
+from ocpp.v16.admin import ActiveChargePoints, create_admin_app
 from ocpp.v16.json_logger import ChargePointJsonLogger, JsonLogStore, decode_frame
 from ocpp.v16.enums import (
     Action,
@@ -180,7 +183,8 @@ class ChargePoint(BaseChargePoint):
         return call_result.DataTransfer(status=DataTransferStatus.rejected)
 
 
-async def on_connect(websocket, repository: OcppRepository, log_store: JsonLogStore):
+async def on_connect(websocket, repository: OcppRepository, log_store: JsonLogStore,
+                     active_chargepoints: ActiveChargePoints):
     """Valida il sottoprotocollo e avvia un handler per la connessione CP."""
     if not websocket.subprotocol:
         LOGGER.warning("Sottoprotocollo OCPP non negoziato; chiusura connessione")
@@ -196,11 +200,12 @@ async def on_connect(websocket, repository: OcppRepository, log_store: JsonLogSt
     )
     await json_logger.event("connected")
     LOGGER.info("Charge point %s connesso", charge_point_id)
+    chargepoint = ChargePoint(charge_point_id, websocket, repository, json_logger, remote_ip)
+    await active_chargepoints.add(charge_point_id, chargepoint)
     try:
-        await ChargePoint(
-            charge_point_id, websocket, repository, json_logger, remote_ip
-        ).start()
+        await chargepoint.start()
     finally:
+        await active_chargepoints.remove(charge_point_id, chargepoint)
         await json_logger.event("disconnected")
 
 
@@ -212,6 +217,12 @@ async def main() -> None:
         raise RuntimeError("DATABASE_URL non e' impostata.")
     host = os.getenv("OCPP_HOST", "0.0.0.0")
     port = int(os.getenv("OCPP_PORT", "9000"))
+    ui_host = os.getenv("UI_HOST", "0.0.0.0")
+    ui_port = int(os.getenv("UI_PORT", "8080"))
+    ui_username = os.getenv("UI_USERNAME")
+    ui_password = os.getenv("UI_PASSWORD")
+    if not ui_username or not ui_password:
+        raise RuntimeError("UI_USERNAME e UI_PASSWORD devono essere impostate.")
     log_store = JsonLogStore(
         os.getenv("OCPP_LOG_DIR") or None,
         int(os.getenv("OCPP_LOG_RETENTION_DAYS", "30")),
@@ -220,15 +231,24 @@ async def main() -> None:
     pool = await asyncpg.create_pool(dsn=database_url, min_size=1, max_size=10)
     try:
         repository = OcppRepository(pool)
+        active_chargepoints = ActiveChargePoints()
+        static_dir = Path(__file__).resolve().parents[2] / "ui" / "dist"
+        app = create_admin_app(repository, active_chargepoints, ui_username, ui_password, static_dir)
+        http_server = uvicorn.Server(uvicorn.Config(app, host=ui_host, port=ui_port, log_level="info"))
+        http_task = asyncio.create_task(http_server.serve())
         async with websockets.serve(
-            lambda websocket: on_connect(websocket, repository, log_store),
+            lambda websocket: on_connect(websocket, repository, log_store, active_chargepoints),
             host,
             port,
             subprotocols=["ocpp1.6"],
         ):
             LOGGER.info("Server OCPP 1.6J in ascolto su %s:%s", host, port)
+            LOGGER.info("Console amministrativa in ascolto su %s:%s", ui_host, ui_port)
             await asyncio.Future()
     finally:
+        if "http_server" in locals():
+            http_server.should_exit = True
+            await http_task
         await pool.close()
 
 

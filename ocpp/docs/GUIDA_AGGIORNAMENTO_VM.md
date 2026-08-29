@@ -18,6 +18,15 @@ La configurazione riservata del server è nel file:
 
 Il file `.env` non deve essere committato nel repository e non viene sovrascritto da `git pull`.
 
+Per abilitare la console web, aggiungere inoltre:
+
+```env
+UI_HOST=0.0.0.0
+UI_PORT=8080
+UI_USERNAME=admin
+UI_PASSWORD=SCEGLI_UNA_PASSWORD_FORTE
+```
+
 ## Log JSON locali
 
 Il server conserva una copia giornaliera degli eventi OCPP in:
@@ -42,6 +51,7 @@ git status --short
 git pull --ff-only origin main
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m ocpp.v16.db.migrate
+cd ui && npm ci && npm run build && cd ..
 pm2 restart ocpp-server --update-env
 pm2 save
 '
@@ -75,6 +85,8 @@ sudo ss -ltnp | grep :9000
 ```
 
 L'output atteso contiene `0.0.0.0:9000`.
+
+La console è disponibile su `http://IP_VM:8080` e richiede le credenziali Basic Auth configurate nel file `.env`. Creare inoltre una regola firewall Google Cloud TCP `8080`, limitata agli IP amministrativi autorizzati.
 
 ## Riavviare senza aggiornare il codice
 
