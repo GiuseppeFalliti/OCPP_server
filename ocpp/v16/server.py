@@ -25,6 +25,15 @@ from ocpp.v16.enums import (
 LOGGER = logging.getLogger("ocpp.v16.server")
 
 
+def json_log_details(action, frame) -> dict | None:
+    """Espone nei log locali i campi operativi principali di alcuni messaggi."""
+    if action != Action.stop_transaction.value:
+        return None
+    if not isinstance(frame, list) or len(frame) < 4 or not isinstance(frame[3], dict):
+        return {"reason": None}
+    return {"reason": frame[3].get("reason")}
+
+
 class ChargePoint(BaseChargePoint):
     """Handler OCPP 1.6J che registra messaggi e dati normalizzati."""
 
@@ -41,16 +50,24 @@ class ChargePoint(BaseChargePoint):
         action, frame = decode_frame(raw_msg)
         if isinstance(frame, list) and len(frame) > 2 and frame[0] == 2:
             self._request_actions[str(frame[1])] = action
-        await self.json_logger.event("message", direction="incoming", raw=raw_msg, action=action)
-        await self.repository.record_message(self.id, raw_msg, "incoming")
+        await self.json_logger.event(
+            "message",
+            direction="incoming",
+            raw=raw_msg,
+            action=action,
+            details=json_log_details(action, frame),
+        )
+        await self.repository.record_message(self.id, raw_msg, "incoming", action)
         await super().route_message(raw_msg)
 
     async def _send(self, message):
         action, frame = decode_frame(message)
         if isinstance(frame, list) and len(frame) > 1 and frame[0] in (3, 4):
             action = self._request_actions.pop(str(frame[1]), action)
-        await self.json_logger.event("message", direction="outgoing", raw=message, action=action)
-        await self.repository.record_message(self.id, message, "outgoing")
+        await self.json_logger.event(
+            "message", direction="outgoing", raw=message, action=action
+        )
+        await self.repository.record_message(self.id, message, "outgoing", action)
         await super()._send(message)
 
     @on(Action.boot_notification)

@@ -49,6 +49,32 @@ class OcppRepositoryTest(unittest.IsolatedAsyncioTestCase):
             {"status": "Available", "error_code": "NoError"},
         )
 
+    async def test_stop_transaction_preserves_reason_or_null(self):
+        repository = StopRepository()
+        for reason in ("EVDisconnected", "OtherError", None):
+            with self.subTest(reason=reason):
+                await repository.stop_transaction(
+                    "CP-03",
+                    {
+                        "transaction_id": 7,
+                        "meter_stop": 42,
+                        "timestamp": "2026-08-29T10:00:00Z",
+                        "reason": reason,
+                    },
+                )
+                self.assertEqual(repository.pool.last_execute[1][3], reason)
+
+    async def test_message_response_uses_correlated_action(self):
+        pool = CapturePool()
+        repository = OcppRepository(pool)
+
+        await repository.record_message(
+            "CP-04", '[3,"request-id",{"currentTime":"2026-08-29T10:00:00Z"}]',
+            "outgoing", "Heartbeat"
+        )
+
+        self.assertEqual(pool.last_execute[1][1], "Heartbeat")
+
 
 class StatusRepository(OcppRepository):
     def __init__(self):
@@ -67,6 +93,23 @@ class StatusRepository(OcppRepository):
 
 class StatusPool:
     async def execute(self, *args):
+        return "UPDATE 1"
+
+
+class StopRepository(OcppRepository):
+    def __init__(self):
+        self.pool = CapturePool()
+
+    async def get_transaction(self, transaction_id):
+        return {"id": 15, "connector_id": 30}
+
+
+class CapturePool:
+    def __init__(self):
+        self.last_execute = None
+
+    async def execute(self, query, *args):
+        self.last_execute = (query, args)
         return "UPDATE 1"
 
 

@@ -33,14 +33,18 @@ class OcppRepository:
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
-    async def record_message(self, identity: str, raw: str, way: str) -> None:
-        action = "Unknown"
-        try:
-            decoded = json.loads(raw)
-            if isinstance(decoded, list) and len(decoded) > 2:
-                action = str(decoded[2]) if decoded[0] == 2 else str(decoded[0])
-        except (json.JSONDecodeError, IndexError, TypeError):
-            action = "InvalidFrame"
+    async def record_message(
+        self, identity: str, raw: str, way: str, action: str | None = None
+    ) -> None:
+        """Registra un frame raw usando l'action OCPP correlata quando disponibile."""
+        if action is None:
+            action = "Unknown"
+            try:
+                decoded = json.loads(raw)
+                if isinstance(decoded, list) and len(decoded) > 2:
+                    action = str(decoded[2]) if decoded[0] == 2 else str(decoded[0])
+            except (json.JSONDecodeError, IndexError, TypeError):
+                action = "InvalidFrame"
         await self.pool.execute(
             """INSERT INTO ocpp_message_log
                (chargepointorigin, message_type, body, way)
