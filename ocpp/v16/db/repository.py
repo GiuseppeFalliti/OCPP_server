@@ -176,7 +176,11 @@ class OcppRepository:
         self, identity: str, payload: dict[str, Any]
     ) -> asyncpg.Record:
         cp = await self.ensure_chargepoint(identity)
-        connector = await self.ensure_connector(cp, payload["connector_id"], **payload)
+        connector_id = payload["connector_id"]
+        connector_payload = {
+            key: value for key, value in payload.items() if key != "connector_id"
+        }
+        connector = await self.ensure_connector(cp, connector_id, **connector_payload)
         await self.pool.execute(
             """UPDATE ocpp_chargepoint SET status = $2, last_status = $2,
                last_heartbeat = NOW() WHERE id = $1""",
