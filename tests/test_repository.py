@@ -49,6 +49,18 @@ class OcppRepositoryTest(unittest.IsolatedAsyncioTestCase):
             {"status": "Available", "error_code": "NoError"},
         )
 
+    async def test_connector_zero_updates_only_chargepoint_status(self):
+        repository = StatusRepository()
+
+        connector = await repository.update_status(
+            "CP-02",
+            {"connector_id": 0, "status": "Available", "error_code": "NoError"},
+        )
+
+        self.assertIsNone(connector)
+        self.assertIsNone(repository.connector_id)
+        self.assertIn("UPDATE ocpp_chargepoint", repository.pool.last_execute[0])
+
     async def test_stop_transaction_preserves_reason_or_null(self):
         repository = StopRepository()
         for reason in ("EVDisconnected", "OtherError", None):
@@ -92,7 +104,11 @@ class StatusRepository(OcppRepository):
 
 
 class StatusPool:
+    def __init__(self):
+        self.last_execute = None
+
     async def execute(self, *args):
+        self.last_execute = args
         return "UPDATE 1"
 
 

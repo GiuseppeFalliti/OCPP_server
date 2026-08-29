@@ -176,11 +176,34 @@ class OcppRepository:
             as_json(values),
         )
 
+    async def ensure_default_connector(self, chargepoint: asyncpg.Record) -> None:
+        """Crea il connettore fisico 1 senza alterare uno stato già comunicato."""
+        await self.pool.execute(
+            """INSERT INTO ocpp_connector
+               (connector_id, chargepoint_id, station_id, plug_type_id, status, metadata)
+               VALUES (1, $1, $2, 'UNKNOWN', 'Unknown', '{}'::jsonb)
+               ON CONFLICT (station_id, chargepoint_id, connector_id) DO NOTHING""",
+            chargepoint["id"],
+            chargepoint["station_id"],
+        )
+
     async def update_status(
         self, identity: str, payload: dict[str, Any]
-    ) -> asyncpg.Record:
+    ) -> asyncpg.Record | None:
         cp = await self.ensure_chargepoint(identity)
         connector_id = payload["connector_id"]
+        # OCPP 1.6 riserva connectorId 0 allo stato complessivo del Charge Point:
+        # non rappresenta una presa fisica e non deve creare un ocpp_connector.
+        if connector_id == 0:
+            await self.pool.execute(
+                """UPDATE ocpp_chargepoint SET status = $2, last_status = $2,
+                   last_heartbeat = NOW() WHERE id = $1""",
+                cp["id"],
+                str(payload["status"]),
+            )
+            if str(payload["status"]) == "Faulted":
+                await self.upsert_alert(cp, None, "Faulted", payload)
+            return None
         connector_payload = {
             key: value for key, value in payload.items() if key != "connector_id"
         }

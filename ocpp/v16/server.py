@@ -75,6 +75,7 @@ class ChargePoint(BaseChargePoint):
         chargepoint = await self.repository.ensure_chargepoint(
             self.id, payload, self.remote_ip
         )
+        await self.repository.ensure_default_connector(chargepoint)
         await self.json_logger.set_serial_number(chargepoint["serial_number"])
         return call_result.BootNotification(
             current_time=datetime.now(timezone.utc).isoformat(),
