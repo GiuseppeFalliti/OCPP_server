@@ -2,21 +2,53 @@
 
 ## 1. Prerequisiti
 
-La macchina deve avere PostgreSQL raggiungibile, Python 3.11 o superiore, Git, Node.js con npm e PM2.
+La macchina deve avere PostgreSQL raggiungibile, Python 3.11 o superiore, Node.js con npm e PM2.
 
 Su Ubuntu/Debian:
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip postgresql-client nodejs npm
+sudo apt install -y python3 python3-venv python3-pip postgresql-client nodejs npm rsync
 sudo npm install -g pm2
 ```
 
-## 2. Utente e repository
+## 2. Utente e copia locale del progetto
 
 ```bash
 sudo useradd --system --create-home --home-dir /opt/ocpp-server --shell /usr/sbin/nologin ocpp
-sudo -u ocpp -H git clone https://github.com/GiuseppeFalliti/OCPP_server.git /opt/ocpp-server/app
+sudo mkdir -p /opt/ocpp-server/app
+sudo chown ocpp:ocpp /opt/ocpp-server/app
+```
+
+Copiare la cartella del progetto dalla macchina di sviluppo alla nuova macchina. Non è necessario usare GitHub.
+
+Esempio da eseguire **sulla macchina di sviluppo**, con `IP_NUOVA_MACCHINA` sostituito dall'indirizzo della destinazione:
+
+```bash
+rsync -av \
+  --exclude '.git' \
+  --exclude '.venv' \
+  --exclude '.venv-1' \
+  --exclude 'ui/node_modules' \
+  --exclude 'ui/dist' \
+  --exclude 'ocpp/Logs' \
+  /percorso/locale/OCPP_server/ \
+  UTENTE_SSH@IP_NUOVA_MACCHINA:/tmp/ocpp-server/
+```
+
+Poi, sulla nuova macchina, spostare i file nella posizione definitiva:
+
+```bash
+sudo rsync -a --chown=ocpp:ocpp /tmp/ocpp-server/ /opt/ocpp-server/app/
+```
+
+La cartella temporanea `/tmp/ocpp-server` può essere rimossa in seguito, dopo aver verificato che il servizio funzioni correttamente.
+
+> Se non si usa `rsync`, copiare la cartella tramite supporto locale o `scp`, mantenendo la struttura del progetto e senza includere ambienti virtuali, `node_modules`, build `ui/dist` e log generati.
+
+Installare quindi dipendenze Python e compilare la UI:
+
+```bash
 sudo -u ocpp -H bash -c '
 set -e
 cd /opt/ocpp-server/app
